@@ -5,5 +5,5 @@ module.exports = {
   },
   testEnvironment: "jsdom",
   globals: {},
-  setupFiles: ["fake-indexeddb/auto"],
+  setupFiles: ["fake-indexeddb/auto", "./tests/setup.js"],
 };

@@ -6,9 +6,10 @@ import { _log } from "./logger/logger";
 import { makeMessage } from "./network";
 import { applyWebRTCMessage, setWebRTCToken } from "./webrtc";
 
+//_ Address of the gate (signaling server). REACT_APP_GATE_URL overrides the default at build time.
 export const localhost =
-  process.env.NODE_ENV === "development" ? "http://localhost" : "https://prfct.ee";
-// const localhost = "https://prfct.ee";
+  process.env.REACT_APP_GATE_URL ||
+  (process.env.NODE_ENV === "development" ? "http://localhost" : "https://prfct.ee");
 
 const socket = io(localhost, {
   autoConnect: false,

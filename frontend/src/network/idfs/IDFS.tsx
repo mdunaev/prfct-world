@@ -147,7 +147,8 @@ const pushToRouter = (
     const routerHexid = getHashFromData(router);
     saveToDB(router);
 
-    const insuranceRouter = router.routers[router.layer + 1 + "/" + shift];
+    const insuranceRouterHexid = router.routers[router.layer + 1 + "/" + shift];
+    const insuranceRouter = insuranceRouterHexid && getRouterFromDB(insuranceRouterHexid);
     insuranceRouter && affectedRouters.push(insuranceRouter);
 
     return { size: router.size, hexid: routerHexid, affectedRouters };
@@ -434,7 +435,7 @@ export const setElementToVipList = (elementHexIds: string[]) => {
   peers.forEach((peerHexid) => {
     elementHexIds.forEach((elementHexId) => {
       const element = getElementFromDB(elementHexId);
-      sendIDFSElement(peerHexid, element);
+      element && sendIDFSElement(peerHexid, element);
     });
   });
 }; //

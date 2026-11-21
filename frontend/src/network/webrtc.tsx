@@ -41,7 +41,29 @@ export const applyWebRTCMessage = (message: Message) => {
 const connections: Record<string, RTCPeerConnection> = {};
 const dataChannels: Record<string, RTCDataChannel> = {};
 
-const recievedMessagesStamp: number[] = [];
+//_ Signatures of SMS messages that have already arrived. The signature is unique for a message,
+//_ unlike the datestamp: two different messages can be created in the same millisecond.
+const recievedSMSSignatures = new Set<string>();
+const maxRecievedSMSSignatures = 10000;
+
+//_ ICE candidates that arrived before the remote description was set
+const pendingIceCandidates: Record<string, RTCIceCandidateInit[]> = {};
+const maxPendingIceCandidates = 64;
+const maxPendingIcePeers = 32;
+
+const flushIceCandidates = (hexid: string) => {
+  const candidates = pendingIceCandidates[hexid] || [];
+  delete pendingIceCandidates[hexid];
+  candidates.forEach((candidate) => addIceCandidate(hexid, candidate));
+};
+
+const addIceCandidate = (hexid: string, candidate: RTCIceCandidateInit) => {
+  connections[hexid]
+    ?.addIceCandidate(candidate)
+    .catch((error) =>
+      _log("webrtc", `💥 error - ice candidate from ${hexid.slice(0, 6)} ` + error)
+    );
+};
 
 const addDataChannel = (hexid: string, dataChannel: RTCDataChannel) => {
   dataChannels[hexid] = dataChannel;
@@ -58,13 +80,16 @@ const addDataChannel = (hexid: string, dataChannel: RTCDataChannel) => {
       signedMessageStream.emit(signedMessage);
 
       if (signedMessage.raw.type === "IDFS") {
-        saveToDB(signedMessage.raw.data);
+        signedMessage.raw.data && saveToDB(signedMessage.raw.data);
         return;
       }
 
       if (signedMessage.raw.type === "SMS") {
-        if (recievedMessagesStamp.includes(signedMessage.raw.datestamp)) return;
-        recievedMessagesStamp.push(signedMessage.raw.datestamp);
+        if (recievedSMSSignatures.has(signedMessage.signature)) return;
+        recievedSMSSignatures.add(signedMessage.signature);
+        if (recievedSMSSignatures.size > maxRecievedSMSSignatures) {
+          recievedSMSSignatures.delete(recievedSMSSignatures.values().next().value as string);
+        }
 
         smsMessageStream.emit(signedMessage);
         signedMessage.raw.data.type !== "SMS_PING" &&
@@ -101,6 +126,8 @@ const addDataChannel = (hexid: string, dataChannel: RTCDataChannel) => {
 };
 
 export const destroy = (hexid: string) => {
+  delete pendingIceCandidates[hexid];
+
   if (dataChannels[hexid]) {
     dataChannels[hexid].close();
     dataChannels[hexid].onmessage = null;
@@ -145,11 +172,16 @@ export const directConnectWith = async (hexid: string) => {
     addDataChannel(hexid, dataChannel);
   };
 
-  const description = await connection.createOffer();
-  connection.setLocalDescription(description);
+  try {
+    const description = await connection.createOffer();
+    await connection.setLocalDescription(description);
 
-  _log("webrtc", `invite created for ${hexid.slice(0, 6)}`);
-  sendMessage(hexid, "WEBRTC", { subtype: "invite", description });
+    _log("webrtc", `invite created for ${hexid.slice(0, 6)}`);
+    sendMessage(hexid, "WEBRTC", { subtype: "invite", description });
+  } catch (error) {
+    _log("webrtc", `💥 error - create invite for ${hexid.slice(0, 6)} ` + error);
+    if (connections[hexid] === connection) destroy(hexid);
+  }
 };
 
 //_ Apply WebRTC Invite fn
@@ -157,24 +189,41 @@ export const directConnectWith = async (hexid: string) => {
 const webrtcApplyInvite = async (hexid: string, description: RTCSessionDescriptionInit) => {
   _log("webrtc", `apply invite from ${hexid.slice(0, 6)}. description.type - ${description.type}`);
 
+  // candidates that came before the invite belong to this new connection
+  const earlyCandidates = pendingIceCandidates[hexid];
+
   const connection = createConnetion(hexid);
+  if (earlyCandidates) pendingIceCandidates[hexid] = earlyCandidates;
+
   connection.ondatachannel = (event) => {
     const dataChannel = event.channel;
     addDataChannel(hexid, dataChannel);
     _log("webrtc", `👻 data channel open by invite with  ${hexid.slice(0, 6)}`);
   };
 
-  connection.setRemoteDescription(description);
-  const answer = await connection.createAnswer();
-  connection.setLocalDescription(answer);
+  try {
+    await connection.setRemoteDescription(description);
+    flushIceCandidates(hexid);
+    const answer = await connection.createAnswer();
+    await connection.setLocalDescription(answer);
 
-  sendMessage(hexid, "WEBRTC", { subtype: "invite response", description: answer });
+    sendMessage(hexid, "WEBRTC", { subtype: "invite response", description: answer });
+  } catch (error) {
+    _log("webrtc", `💥 error - apply invite from ${hexid.slice(0, 6)} ` + error);
+    if (connections[hexid] === connection) destroy(hexid);
+  }
 };
 
 //_ Apply Invite response fn
-const webrtcApplyInviteResponse = (hexid: string, description: RTCSessionDescriptionInit) => {
-  if (connections[hexid]) {
-    connections[hexid].setRemoteDescription(description);
+const webrtcApplyInviteResponse = async (hexid: string, description: RTCSessionDescriptionInit) => {
+  const connection = connections[hexid];
+  if (!connection) return;
+
+  try {
+    await connection.setRemoteDescription(description);
+    flushIceCandidates(hexid);
+  } catch (error) {
+    _log("webrtc", `💥 error - apply invite response from ${hexid.slice(0, 6)} ` + error);
   }
 };
 
@@ -189,10 +238,23 @@ const onIceCandidate = (hexid: string) => (event: RTCPeerConnectionIceEvent) => 
 };
 
 //_ Apply Ice Candidate fn
-const webtrcApplyIceCandidate = (hexid: string, candidate: RTCIceCandidate) => {
+const webtrcApplyIceCandidate = (hexid: string, candidate: RTCIceCandidateInit) => {
+  if (!candidate) return;
+
   if (connections[hexid]?.remoteDescription?.type) {
-    connections[hexid].addIceCandidate(candidate);
+    addIceCandidate(hexid, candidate);
+    return;
   }
+
+  // the remote description is not set yet: keep the candidate instead of losing it
+  if (!pendingIceCandidates[hexid]) {
+    // peers that never send an invite must not fill the memory: forget the oldest one
+    const pendingPeers = Object.keys(pendingIceCandidates);
+    if (pendingPeers.length >= maxPendingIcePeers) delete pendingIceCandidates[pendingPeers[0]];
+    pendingIceCandidates[hexid] = [];
+  }
+  const pending = pendingIceCandidates[hexid];
+  if (pending.length < maxPendingIceCandidates) pending.push(candidate);
 };
 
 //
@@ -223,8 +285,14 @@ export const sendToDatachannel = (hexid: string, message: SignedMessage) => {
   // message.raw.data.type === "SMS_TEXT" && console.log("<-", message);
   const datachannel = dataChannels[hexid];
   if (datachannel && datachannel.readyState === "open") {
-    datachannel.send(JSON.stringify(message));
-    return true;
+    try {
+      datachannel.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      // full send buffer or too big message: delivery is best-effort and must not break the caller
+      _log("webrtc", `💥 error - send to ${hexid.slice(0, 6)} ` + error);
+      return false;
+    }
   } else {
     return false;
   }

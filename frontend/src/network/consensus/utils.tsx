@@ -1,15 +1,9 @@
-import { BlockActions, BlockData, StateElementWithPath } from "../interfaces";
+import { Action, BlockActions, BlockData, StateElementWithPath } from "../interfaces";
 import { actionBonus, stepSize, supportNodes } from "./constants";
 import { getHashFromData, getHexPosition } from "../crypto/crypto";
-import {
-  getRootHexid,
-  setRootHexid,
-  StateElement,
-  VerificationStatus,
-  verifyElementInIDFS,
-} from "../idfs/IDFS";
+import { getRootHexid, setRootHexid, StateElement } from "../idfs/IDFS";
 import { runActions } from "./runActions";
-import { getActions } from "./consensus";
+import { getActions, state } from "./consensus";
 import { saveToDB } from "../idfs/idfsDB";
 
 const countDistanceScores = (block: BlockData) => {
@@ -90,6 +84,34 @@ export const saveWalletFromBlock = (wallet?: StateElementWithPath) => {
   saveToDB(wallet.element);
 };
 
-export const isWalletVerified = (wallet?: StateElementWithPath) => {
-  return verifyElementInIDFS(getHashFromData(wallet)) !== VerificationStatus.FOUND;
+//_ Verify that the wallet is a part of the state with the given root router.
+//_ The path is a proof: a chain of routers from the root down to the router that holds the wallet.
+//_ Every link is checked by hash, so the check does not depend on what is in the local DB.
+export const isWalletVerified = (wallet: StateElementWithPath | undefined, rootHexid: string) => {
+  const element = wallet?.element;
+  const path = wallet?.path;
+
+  if (!element || !Array.isArray(path) || path.length === 0) return false;
+
+  try {
+    if (getHashFromData(path[0]) !== rootHexid) return false;
+
+    for (let i = 0; i < path.length - 1; i++) {
+      const nextRouterHexid = getHashFromData(path[i + 1]);
+      const routers = Object.values(path[i]?.routers || {});
+      if (!routers.includes(nextRouterHexid)) return false;
+    }
+
+    const elementHexid = getHashFromData(element);
+    const lastRouter = path[path.length - 1];
+    const elementInfo = lastRouter.stateElements.find((info) => info?.hexId === elementHexid);
+
+    return !!elementInfo && element.ttd >= state.blockNumber;
+  } catch (error) {
+    // the proof comes from another peer and can have any shape
+    return false;
+  }
 };
+
+//_ The part of the action that its author signs
+export const getActionPayload = ({ from, type, ttr, data }: Action) => ({ from, type, ttr, data });

@@ -10,6 +10,7 @@ export interface ColdMessagesStorage {
 export interface Block {
   scores: number;
   data: BlockData;
+  signature?: string; // data signed by data.author
 }
 
 export interface StateElementWithPath {
@@ -44,6 +45,7 @@ export interface Action {
   type: string;
   ttr: number; // time to run
   data: any;
+  signature?: string; // { from, type, ttr, data } signed by from
 }
 
 export interface ActionContainer {

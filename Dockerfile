@@ -7,6 +7,9 @@ COPY ./frontend/src/network/package.json ./src/network/
 RUN npm i
 RUN npm i --prefix ./src/network/
 COPY ./frontend ./
+# address of the gate for this build, see README. Empty: the default from socket.tsx
+ARG REACT_APP_GATE_URL
+ENV REACT_APP_GATE_URL=$REACT_APP_GATE_URL
 RUN npm run build
 # RUN npm run build-storybook
 

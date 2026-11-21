@@ -14,7 +14,7 @@ export const isNeighborByHexDistance = (peerHexId: string, dataHash: string) => 
   if (!allChildren) {
     return false;
   }
-  const myPosition = allChildren.sort().indexOf(myHexid());
+  const myPosition = [...allChildren].sort().indexOf(myHexid());
   const positionLength = maxPositionValue / allChildren.length;
   const mainStartPosition = maxPositionValue * (myPosition / allChildren.length);
   const mainEndPosition = mainStartPosition + positionLength;

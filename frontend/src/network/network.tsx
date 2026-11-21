@@ -1,6 +1,7 @@
 import { addNewAction, addNewBlock, addNewColdMessage, state } from "./consensus/consensus";
 import { stepDuration, supportNodes } from "./consensus/constants";
 import { runActions } from "./consensus/runActions";
+import { getActionPayload } from "./consensus/utils";
 import {
   decryptFrom,
   encryptFor,
@@ -8,6 +9,7 @@ import {
   getHexDistance,
   getHexPosition,
   myHexid,
+  signData,
   signMessage,
 } from "./crypto/crypto";
 import { Stream } from "./EventEmitter/EventEmitter";
@@ -82,6 +84,7 @@ export const sendAction = (type: string, data: any) => {
     ttr: state.blockNumber + 2,
     data: data,
   };
+  action.signature = signData(getActionPayload(action));
 
   const myBestWallet = getMyBestWallet();
   const rootHexid = getRootHexid();
@@ -139,7 +142,7 @@ export const updateConnections = () => {
   }
   if (networkState.peers.length > maxPeers * 2) {
     destroy(
-      networkState.peers.sort(
+      [...networkState.peers].sort(
         (a, b) => getHexDistance(b, myHexid()) - getHexDistance(a, myHexid())
       )[0]
     );
@@ -262,19 +265,30 @@ onDirectMessage((message) => {
       );
       break;
     case "ACTION":
+      const actionContainer: ActionContainer = message.raw.data;
+      // check the whole container before the action takes its place in the queue:
+      // a later intact copy of the same action would be dropped as a duplicate
+      if (
+        !actionContainer ||
+        !Array.isArray(actionContainer.affectedElements) ||
+        !Array.isArray(actionContainer.affectedRoutes)
+      )
+        break;
+
       _log(
         "d_pixel",
-        `get action from ${message.raw.from.slice(0, 6)}  ${JSON.stringify(message.raw.data.data)}`
+        `get action from ${message.raw.from.slice(0, 6)}  ${JSON.stringify(
+          actionContainer.action?.data
+        )}`
       );
-      const actionContainer: ActionContainer = message.raw.data;
       const actionPushResult = addNewAction(actionContainer.action);
 
       if (actionPushResult) {
         for (const item of actionContainer.affectedElements) {
-          saveToDB(item);
+          item && saveToDB(item);
         }
         for (const router of actionContainer.affectedRoutes) {
-          saveToDB(router);
+          router && saveToDB(router);
         }
         broadcastAction(actionContainer, [message.raw.from]);
       }
@@ -332,6 +346,7 @@ const stageSteps = 6;
 const numSymbolsToSave = 5;
 let cacheForSMS: SignedMessage[] = [];
 const arrivedHashList: string[] = [];
+const maxArrivedHashes = 10000;
 
 const resendCachedSMS = () => {
   getHorizonPeers().map((hexid) => {
@@ -353,6 +368,7 @@ onNewSmsMessage((signedSmsMessage: SignedMessage) => {
   const hash = getHashFromData(smsMessage);
   if (arrivedHashList.indexOf(hash) !== -1) return;
   arrivedHashList.push(hash);
+  if (arrivedHashList.length > maxArrivedHashes) arrivedHashList.shift();
 
   if (smsMessage.to === myHexid()) {
     const decodedSMS = smsMessageToSms(smsMessage);
@@ -377,7 +393,7 @@ onNewSmsMessage((signedSmsMessage: SignedMessage) => {
         )
       ) {
         cacheForSMS.push(signedSmsMessage);
-        cacheForSMS = cacheForSMS.slice(0, 1000);
+        cacheForSMS = cacheForSMS.slice(-1000);
       }
     } else {
       sendSMSMessage(signedSmsMessage);
@@ -386,7 +402,7 @@ onNewSmsMessage((signedSmsMessage: SignedMessage) => {
 });
 
 const sendSMSMessage = (signedSmsMessage: SignedMessage) => {
-  const channels = networkState.peers.sort(
+  const channels = [...networkState.peers].sort(
     (a, b) =>
       getHexDistance(a, signedSmsMessage.raw.to) - getHexDistance(b, signedSmsMessage.raw.to)
   );

@@ -3,12 +3,19 @@ services:
   server:
     build: ./server/
     restart: always
+    environment:
+      # optional: without them the gate hands out a public STUN server
+      - TWILIO_ACCOUNT_SID
+      - TWILIO_AUTH_TOKEN
     volumes:
       - ./server/app/:/usr/src/app/app/
     ports:
       - "8080:8080"
   nginx:
-    build: .
+    build:
+      context: .
+      args:
+        - REACT_APP_GATE_URL
     restart: always
     ports:
       - "80:80"

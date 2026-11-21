@@ -1,4 +1,4 @@
-import { getHashFromData, myHexid } from "../crypto/crypto";
+import { getHashFromData, myHexid, signData, verifyData } from "../crypto/crypto";
 import { Stream } from "../EventEmitter/EventEmitter";
 import { getRootHexid, setRootHexid } from "../idfs/IDFS";
 import { getRouterFromDB, saveToDB } from "../idfs/idfsDB";
@@ -7,7 +7,7 @@ import { Action, Actions, Block, ColdMessage, ColdMessagesStorage, State } from 
 import { broadcastBlock, broadcastColdMessage, updateConnections } from "../network";
 import { APP_VERSION, stepDuration, supportNodes, warmupDelay } from "./constants";
 import { runActions } from "./runActions";
-import { countWalletScores, isWalletVerified, measureBlock } from "./utils";
+import { countWalletScores, getActionPayload, isWalletVerified, measureBlock } from "./utils";
 
 export const state: State = {
   blockNumber: 0,
@@ -37,35 +37,49 @@ export const startWarmupStage = () => {
   state.blockNumber = blockNumber;
   console.log(`${blockNumber} --> warmup stage`);
 
-  // Block generation
-  const block: Block = {
-    scores: 0,
-    data: {
-      author: myHexid(),
-      actions: [],
-      initial: getRootHexid(),
-      final: "final",
-      block: state.blockNumber,
-      wallet: getMyBestWallet(),
-    },
-  };
-  const thisStepActions: { [authorHexid: string]: Action } = actions[state.blockNumber] || {};
-
-  const { completedActions } = runActions({
-    actions: thisStepActions,
-    initialRouterHexID: block.data.initial,
-    authorWallet: block.data.wallet?.element,
+  // actions of past blocks are never used again
+  Object.keys(actions).forEach((_blockNumber) => {
+    if (Number(_blockNumber) < blockNumber) delete actions[Number(_blockNumber)];
   });
-  block.data.actions = completedActions;
 
-  block.data.final = getRootHexid();
-  setRootHexid(block.data.initial);
-  const blockScores = measureBlock(block.data, true);
-  block.scores = blockScores;
-  setRootHexid(block.data.initial);
+  const initialRootHexid = getRootHexid();
 
-  addNewBlock(block, myHexid());
-  currentBlockStream.emit(block);
+  try {
+    // Block generation
+    const block: Block = {
+      scores: 0,
+      data: {
+        author: myHexid(),
+        actions: [],
+        initial: initialRootHexid,
+        final: "final",
+        block: state.blockNumber,
+        wallet: getMyBestWallet(),
+      },
+    };
+    const thisStepActions: { [authorHexid: string]: Action } = actions[state.blockNumber] || {};
+
+    const { completedActions } = runActions({
+      actions: thisStepActions,
+      initialRouterHexID: block.data.initial,
+      authorWallet: block.data.wallet?.element,
+    });
+    block.data.actions = completedActions;
+
+    block.data.final = getRootHexid();
+    setRootHexid(block.data.initial);
+    const blockScores = measureBlock(block.data, true);
+    block.scores = blockScores;
+    block.signature = signData(block.data);
+    setRootHexid(block.data.initial);
+
+    addNewBlock(block, myHexid());
+    currentBlockStream.emit(block);
+  } catch (error) {
+    // a broken block must not stop the loop: the next stage is scheduled below anyway
+    console.error("err: consensus.tsx | startWarmupStage()", error);
+    setRootHexid(initialRootHexid);
+  }
 
   console.log(`warmup delay:  ${Date.now() - startTime}`);
   setTimeout(startCooldownStage, warmupDelay - (Date.now() - startTime));
@@ -105,12 +119,26 @@ const actions: Actions = {};
 export const getActions = () => actions;
 
 export const addNewAction = (action: Action): boolean => {
+  const isActionValid =
+    !!action &&
+    typeof action.from === "string" &&
+    typeof action.type === "string" &&
+    Number.isInteger(action.ttr) &&
+    !!action.data &&
+    typeof action.data === "object";
+
+  if (!isActionValid) return false;
+
   const isActionSuitable =
     !actions[action.ttr]?.[action.from] &&
     action.ttr > state.blockNumber &&
     action.ttr < state.blockNumber + 4;
 
   if (!isActionSuitable) return false;
+
+  // actions are relayed by other peers, so only the signature proves who the author is
+  if (!verifyData(getActionPayload(action), action.signature, action.from)) return false;
+
   if (!actions[action.ttr]) actions[action.ttr] = {};
   actions[action.ttr][action.from] = action;
 
@@ -122,8 +150,20 @@ let bestBlock: Block | undefined = undefined;
 export const addNewBlock = (block: Block, from: string) => {
   if (stage == "COOLDOWN") return;
 
+  if (!block?.data || !Array.isArray(block.data.actions)) return;
+
+  // a signed block of a past round must not be replayed into this one
+  if (block.data.block !== state.blockNumber) return;
+
+  // blocks are relayed by other peers, so only the signature proves who the author is
+  if (!verifyData(block.data, block.signature, block.data.author)) return;
+
   const wallet = block.data.wallet?.element;
-  if (wallet && (wallet?.owner !== block.data.author || !isWalletVerified(block.data.wallet)))
+  if (
+    wallet &&
+    (wallet?.owner !== block.data.author ||
+      !isWalletVerified(block.data.wallet, block.data.initial))
+  )
     return;
 
   blockStream.emit({ block, from });
@@ -173,10 +213,19 @@ let bestFinalHexid: string | undefined;
 export const addNewColdMessage = (message: ColdMessage, from: string) => {
   if (stage == "WARMUP") return;
 
-  const wallet = message.wallet?.element;
-  if (wallet) saveToDB(wallet);
+  if (!message?.rootRouter) return;
 
-  if (wallet && (wallet?.owner !== from || !isWalletVerified(message.wallet))) return;
+  const wallet = message.wallet?.element;
+
+  // the wallet must be a part of the state the message votes for
+  if (
+    wallet &&
+    (wallet?.owner !== from ||
+      !isWalletVerified(message.wallet, getHashFromData(message.rootRouter)))
+  )
+    return;
+
+  if (wallet) saveToDB(wallet);
 
   coldMessagesStream.emit({ coldMessage: message, from });
 

@@ -8,23 +8,26 @@ import { cloneObject } from "./utils";
 // Routers DB
 const cache: Record<string, Router | StateElement | undefined> = {};
 (window as any).cache = cache;
-const timeCache: Record<string, boolean> = {};
+//_ Fresh elements are protected from deleteFromDB for a few steps after the last save
+const timeCache: Record<string, ReturnType<typeof setTimeout>> = {};
 
 export const saveToDB = (element: Router | StateElement) => {
-  !element && console.error("!--> setElementToDB, empty element");
+  if (!element || typeof element !== "object") {
+    console.error("!--> setElementToDB, empty element");
+    return;
+  }
   const hexid = getHashFromData(element);
   cache[hexid] = cloneObject(element);
   saveToIndexedDB(element);
 
-  timeCache[hexid] = true;
-  setInterval(() => {
-    timeCache[hexid] = false;
+  if (timeCache[hexid] !== undefined) clearTimeout(timeCache[hexid]);
+  timeCache[hexid] = setTimeout(() => {
     delete timeCache[hexid];
   }, stepDuration * 3);
 };
 
 export const deleteFromDB = async (hexid: string) => {
-  if (timeCache[hexid]) return;
+  if (timeCache[hexid] !== undefined) return;
   delete cache[hexid];
   (await idfsDB)?.delete("elements", hexid);
 };
@@ -102,7 +105,7 @@ setInterval(async () => {
     "owner",
     IDBKeyRange.only(myHexid())
   )) as StateElement[];
-  const filtered = result?.filter(
+  const filtered = (result || []).filter(
     (element) => verifyInIDFS(getHashFromData(element), element) == VerificationStatus.FOUND
   );
   const wallets: MyWallets = new Map(filtered.map((obj) => [getHashFromData(obj), obj]));
