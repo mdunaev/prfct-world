@@ -4,6 +4,7 @@ import { Action } from "../../interfaces";
 import { state } from "../../consensus/consensus";
 import { rootUsers } from "../../consensus/constants";
 import * as IDFS from "../../idfs/IDFS";
+import * as idfsDB from "../../idfs/idfsDB";
 import {
   deleteInIDFS,
   setRootHexid,
@@ -30,7 +31,8 @@ interface InitMock {
 const getWallet = (props?: Partial<StateElement>): StateElement => ({
   lookupKey: "TEST_LOOK_UP_KEY",
   owner: "TEST_AUTHOR_ID",
-  ttd: 10000,
+  // 10000 time points at the block of the test actions
+  ttd: 20000,
   type: StateElementTypes.WALLET,
   data: "test",
   createdAt: 140000000,
@@ -60,11 +62,11 @@ const initMocks = ({
         verifyElementInIDFS || (() => VerificationStatus.FOUND)
       )
     );
-  // jest
-  //   .spyOn(IDFS, "getElementFromDB")
-  //   .mockImplementation(
-  //     getElementFromDBMock.mockImplementation(getElementFromDB || (() => getWallet()))
-  //   );
+  jest
+    .spyOn(idfsDB, "getElementFromDB")
+    .mockImplementation(
+      getElementFromDBMock.mockImplementation(getElementFromDB || (() => getWallet()))
+    );
   jest
     .spyOn(IDFS, "deleteInIDFS")
     .mockImplementation(deleteInIDFSMock.mockImplementation(deleteInIDFS || (() => true)));
@@ -106,8 +108,7 @@ describe("completeActions", () => {
       },
     });
 
-    // TODO: return with rootUsers check
-    test.skip("should complete action from root user only and save minted wallet", async () => {
+    test("should complete action from root user only and save minted wallet", async () => {
       initMocks({});
       const rootUserHexId = rootUsers[0];
       const rootUserAction = getMintAction({
@@ -120,7 +121,7 @@ describe("completeActions", () => {
         [rootUserHexId]: rootUserAction,
       };
       const completedActions = await runActions({ actions, initialRouterHexID: driver.rootHexId });
-      expect(completedActions).toStrictEqual([rootUserHexId]);
+      expect(completedActions.completedActions).toStrictEqual([rootUserHexId]);
       expect(pushToIdfsTreeMock).toBeCalledTimes(1);
       expect(pushToIdfsTreeMock).toBeCalledWith(
         expect.objectContaining({
@@ -207,10 +208,10 @@ describe("completeActions", () => {
       expect(setRootHexidMock).toBeCalledWith(driver.rootHexId);
     });
 
-    test("should not complete split if next source ttd is less then block number", async () => {
-      initMocks({ blockNumber: 1000000000 });
+    test("should not complete split if amount is more than wallet balance", async () => {
+      initMocks({});
       const actions: { [authorHexid: string]: Action } = {
-        TEST_AUTHOR_ID: getSplitAction(),
+        TEST_AUTHOR_ID: getSplitAction({ data: { amount: "10001" } }),
       };
 
       const completedActions = await runActions({ actions, initialRouterHexID: driver.rootHexId });

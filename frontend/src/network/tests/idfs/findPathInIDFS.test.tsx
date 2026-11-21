@@ -20,10 +20,17 @@ describe("findPathInIDFS", () => {
     await driver.setTestElements();
   });
 
+  // the first element that did not fit into the root router is always right below the root
+  const getChildElement = () => {
+    const hexId = driver.getChildElementHexIds()[0];
+    const routerHexId = driver.getRootRouter().routers[driver.getChildRouterKey(hexId)];
+    return { hexId, routerHexId };
+  };
+
   test("should return element path from child router", async () => {
-    const pathTo4thElement = await driver.findPathToElement(driver.testHexIDs[4]);
-    const rootRouterChildRouters = await driver.getRouterRoutesHexIds(driver.rootHexId);
-    expect(pathTo4thElement).toStrictEqual([driver.rootHexId, rootRouterChildRouters[0]]);
+    const { hexId, routerHexId } = getChildElement();
+    expect(routerHexId).toBeDefined();
+    expect(await driver.findPathToElement(hexId)).toStrictEqual([driver.rootHexId, routerHexId]);
   });
 
   test("should return empty path for not added hexId", async () => {
@@ -32,10 +39,9 @@ describe("findPathInIDFS", () => {
   });
 
   test("should return empty path for deleted element", async () => {
-    const testElementHexId = driver.testHexIDs[5];
+    const { hexId: testElementHexId, routerHexId } = getChildElement();
     const foundRouters = await driver.findPathToElement(testElementHexId);
-    const rootRouterChildRouters = await driver.getRouterRoutesHexIds(driver.rootHexId);
-    expect(foundRouters).toStrictEqual([driver.rootHexId, rootRouterChildRouters[1]]);
+    expect(foundRouters).toStrictEqual([driver.rootHexId, routerHexId]);
 
     await driver.deleteItemInIDFS(testElementHexId);
     const foundRoutersAfterDelete = await driver.findPathToElement(testElementHexId);
@@ -43,9 +49,7 @@ describe("findPathInIDFS", () => {
   });
 
   test("should return empty path for lost route elements", async () => {
-    const rootRouterChildRouters = await driver.getRouterRoutesHexIds(driver.rootHexId);
-    const testElementHexId = driver.testHexIDs[4];
-    const firstRouterInRoot = rootRouterChildRouters[0];
+    const { hexId: testElementHexId, routerHexId: firstRouterInRoot } = getChildElement();
 
     const foundRoutersToElement = await driver.findPathToElement(testElementHexId);
     expect(foundRoutersToElement).toStrictEqual([driver.rootHexId, firstRouterInRoot]);

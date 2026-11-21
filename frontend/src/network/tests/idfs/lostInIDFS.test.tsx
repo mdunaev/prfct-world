@@ -1,4 +1,9 @@
-import { StateElement, StateElementTypes, VerificationStatus } from "../../idfs/IDFS";
+import {
+  numElementsInRouter,
+  StateElement,
+  StateElementTypes,
+  VerificationStatus,
+} from "../../idfs/IDFS";
 import { IDFSTestDriver } from "../drivers/idfsTestDriver";
 
 const TEST_DATA: StateElement[] = Array(5)
@@ -30,9 +35,10 @@ describe("lostInIDFS", () => {
 
     // check element verified
     const firsRoutersElements = await driver.getRouterElementHexIds(firstRouterFromRoot);
-    expect(await driver.getElementsVerification(firsRoutersElements)).toStrictEqual([
-      VerificationStatus.FOUND,
-    ]);
+    expect(firsRoutersElements.length).toBeGreaterThan(0);
+    expect(await driver.getElementsVerification(firsRoutersElements)).toStrictEqual(
+      Array(firsRoutersElements.length).fill(VerificationStatus.FOUND)
+    );
 
     // lost created router
     await driver.lostItem(firstRouterFromRoot);
@@ -43,12 +49,16 @@ describe("lostInIDFS", () => {
     );
 
     // check element lost
-    expect(await driver.getElementsVerification(firsRoutersElements)).toStrictEqual([
-      VerificationStatus.LOST,
-    ]);
+    expect(await driver.getElementsVerification(firsRoutersElements)).toStrictEqual(
+      Array(firsRoutersElements.length).fill(VerificationStatus.LOST)
+    );
 
     // check other elements verified
-    const existedElementIds = driver.testHexIDs.slice(0, 4);
+    const lostRouterKey = `${firstRouter.layer}/${firstRouter.shift}`;
+    const existedElementIds = driver.testHexIDs.filter(
+      (hexId, i) => i < numElementsInRouter || driver.getChildRouterKey(hexId) !== lostRouterKey
+    );
+    expect(existedElementIds.length).toBeGreaterThanOrEqual(numElementsInRouter);
     const existedVerification = await driver.getElementsVerification(existedElementIds);
     expect(existedVerification).toStrictEqual(
       Array(existedElementIds.length).fill(VerificationStatus.FOUND)

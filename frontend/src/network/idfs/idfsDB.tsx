@@ -32,6 +32,15 @@ export const deleteFromDB = async (hexid: string) => {
   (await idfsDB)?.delete("elements", hexid);
 };
 
+//_ Forget an element on this node right now, even a fresh one. The state tree is not changed,
+//_ so the element becomes LOST: the tree still refers to it, but the node does not have it.
+export const forgetInDB = async (hexid: string) => {
+  if (timeCache[hexid] !== undefined) clearTimeout(timeCache[hexid]);
+  delete timeCache[hexid];
+  delete cache[hexid];
+  (await idfsDB)?.delete("elements", hexid);
+};
+
 export const getFromDB = (hexid: string): StateElement | Router | undefined => {
   ressurectFromIndexedDB(hexid);
   const fromCache = cloneObject(cache[hexid]);

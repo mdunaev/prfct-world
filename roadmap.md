@@ -13,9 +13,13 @@ Priority:
 Tickets that change the wire format or the consensus rules are marked **breaking**: all nodes
 must update together. The last section gives the order to release them in.
 
-Ticket numbers are not reused. R-23, R-24 and R-25 (lost wallets on delete, merged equal payments,
-balance loss for wallets with data) are fixed; see
-`frontend/src/network/tests/consensus/ledger.test.tsx`.
+Ticket numbers are not reused. Closed so far:
+
+- R-23, R-24, R-25 - lost wallets on delete, merged equal payments, balance loss for wallets with
+  data. See `frontend/src/network/tests/consensus/ledger.test.tsx`.
+- R-17 - the old unit tests. They now check the tree by its rules instead of fixed positions, so
+  they survive a change of `numElementsInRouter`. The score tests only pin the current formula;
+  R-26 and R-27 will change it.
 
 ## P0 - consensus
 
@@ -261,7 +265,6 @@ Raise this to P0 if the chain must survive that.
 - Done: the committed round and root are stored, with the write awaited, when a round ends - not on
   every `setRootHexid`, which also changes for trial runs. On start the node restores them before
   consensus and before the scanner deletes anything. Test: reload in the middle of a round.
-  `lostInIDFS` is implemented or removed together with its tests.
 
 ### R-12. Do not drive the engine with requestAnimationFrame
 
@@ -310,15 +313,6 @@ connection failed). The `nginx.conf` in the repository listens on port 80 only.
 
 ## P2 - quality and tooling
 
-### R-17. Repair the old unit tests
-
-20 tests in `frontend/src/network/tests` fail and one mint authorization test is skipped. They
-describe an older tree (4 elements per router, now 3), an implemented `lostInIDFS`, old mocks of
-`runActions` and old score values.
-
-- Done: every test is either updated to the current behaviour after checking that the behaviour is
-  intended, or deleted with a reason; the skipped test runs; `npm test` is green.
-
 ### R-18. Docker build
 
 The images use `node:14-alpine`, which is past its end of life. The frontend image runs `npm i`
@@ -348,8 +342,7 @@ no tests. Its message types are copies of the frontend ones and already differ (
 Nothing checks a change automatically.
 
 - Done: a workflow runs, on every pull request, the frontend type check and build, `npm test` in
-  `frontend/src/network`, and the gate build and tests. Start it before R-17 is finished, with the
-  known failures listed, so new failures are visible.
+  `frontend/src/network`, and the gate build and tests.
 
 ### R-21. Lint warnings and small cleanups
 
@@ -373,8 +366,8 @@ commented code reads `action.ttr` before `action` exists.
 
 ## Release order
 
-1. **Safety net:** R-20 (CI with the known failures listed), R-19 (gate build, shared wire types
-   and test vectors), then R-17.
+1. **Safety net:** R-20 (CI; `npm test` in the engine is green today), R-19 (gate build, shared
+   wire types and test vectors).
 2. **Fixes that do not change the protocol:** R-29, R-28, R-12, R-14, R-30, R-06, R-08, R-10.
 3. **Version boundary:** R-04 together with R-05. Everything below ships behind a new protocol
    version, so old tabs are cut off instead of splitting the network.

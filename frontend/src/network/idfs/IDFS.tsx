@@ -5,6 +5,7 @@ import { sendIDFSElement } from "../network";
 import { getState } from "../state";
 import {
   deleteFromDB,
+  forgetInDB,
   getAllKeys,
   getElementFromDB,
   getFromDB,
@@ -269,9 +270,9 @@ const deleteInIDFSRecursion = (
   }
 };
 
+//_ Drop the local copy of a router or a state element (for the IDE widget and tests)
 export const lostInIDFS = (hexid: string) => {
-  // deleteRouterFromDB(hexid);
-  // deleteStateElementsFromDB(hexid);
+  forgetInDB(hexid);
 };
 
 export const verifyInIDFS = (hexid: string, element: StateElement | Router | undefined) => {

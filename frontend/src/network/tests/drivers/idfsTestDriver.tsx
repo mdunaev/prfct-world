@@ -1,35 +1,39 @@
 import {
   deleteInIDFS,
   findPathToElementInIDFS,
+  getRootHexid,
   initRootRouter,
   lostInIDFS,
-  onIDFSUpdate,
+  numElementsInRouter,
   pushToIdfsTree,
   Router,
   StateElement,
   verifyElementInIDFS,
   verifyRouterInIDFS,
 } from "../../idfs/IDFS";
-import { getHashFromData } from "../../crypto/crypto";
-import { wait } from "@testing-library/user-event/dist/utils";
+import { getHashFromData, getHexPosition, maxPositionValue } from "../../crypto/crypto";
 import { getElementFromDB, getRouterFromDB } from "../../idfs/idfsDB";
+
+// IDFS.tsx creates its root router one animation frame after it is loaded.
+// Wait for that once, so it can not reset the tree in the middle of the first test.
+const idfsStarted = new Promise((resolve) => setTimeout(resolve, 50));
 
 export class IDFSTestDriver {
   testHexIDs: string[] = [];
-  rootHexId: string = "";
-  private rootRouter?: Router;
   testData: StateElement[];
 
   constructor(testData: StateElement[]) {
     this.testData = testData;
   }
 
+  // the root is read from the tree itself: the update stream is delivered a frame later
+  get rootHexId() {
+    return getRootHexid();
+  }
+
   async initIDFS() {
-    onIDFSUpdate((hexId) => {
-      this.rootHexId = hexId;
-    });
+    await idfsStarted;
     await initRootRouter();
-    await wait(100);
   }
 
   async setTestElements() {
@@ -37,27 +41,18 @@ export class IDFSTestDriver {
     for (const stateElement of this.testData) {
       await this.pushElementToTree(stateElement);
     }
-    await wait(100);
   }
 
   async pushElementToTree(element: StateElement) {
     await pushToIdfsTree(element);
-    await this.updateRootRouter();
-  }
-
-  async updateRootRouter() {
-    const foundNewRouter = await getRouterFromDB(this.rootHexId);
-    if (!foundNewRouter) {
-      throw new Error("Root Router is undefined");
-    }
-    this.rootRouter = foundNewRouter;
   }
 
   getRootRouter() {
-    if (!this.rootRouter) {
+    const rootRouter = getRouterFromDB(this.rootHexId);
+    if (!rootRouter) {
       throw new Error("Root Router is undefined");
     }
-    return this.rootRouter;
+    return rootRouter;
   }
 
   async getRouterByHexId(hesId: string) {
@@ -66,6 +61,24 @@ export class IDFSTestDriver {
       throw new Error(`Router ${hesId} is undefined`);
     }
     return router;
+  }
+
+  // the key of the child router that an element goes to from a router of this layer
+  getChildRouterKey(hexId: string, layer: number = 0) {
+    const routerLength = maxPositionValue / numElementsInRouter ** (layer + 1);
+    return layer + 1 + "/" + Math.floor(getHexPosition(hexId) / routerLength);
+  }
+
+  // elements that do not fit into the root router
+  getChildElementHexIds() {
+    return this.testHexIDs.slice(numElementsInRouter);
+  }
+
+  // elements that the tree rules put into this child router of the root
+  getExpectedChildElementHexIds(childRouterKey: string) {
+    return this.getChildElementHexIds()
+      .filter((hexId) => this.getChildRouterKey(hexId) === childRouterKey)
+      .slice(0, numElementsInRouter);
   }
 
   async getElementVerification(elementsHexId: string) {
@@ -85,14 +98,12 @@ export class IDFSTestDriver {
 
   async deleteItemInIDFS(hexId: string) {
     await deleteInIDFS(hexId);
-    await this.updateRootRouter();
   }
 
   async deleteItemListInIDFS(hexIds: string[]) {
     for (const hexId of hexIds) {
       await this.deleteItemInIDFS(hexId);
     }
-    await this.updateRootRouter();
   }
 
   async getRouterElementHexIds(routerHexId: string) {

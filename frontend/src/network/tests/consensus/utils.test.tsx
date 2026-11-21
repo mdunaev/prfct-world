@@ -1,5 +1,6 @@
 import { Actions, BlockData } from "../../interfaces";
-import { stepSize } from "../../consensus/constants";
+import { actionBonus, stepSize } from "../../consensus/constants";
+import { getHashFromData, getHexPosition } from "../../crypto/crypto";
 import { measureBlock, timePointsToTDD, ttdToTimePoints } from "../../consensus/utils";
 import * as completeActions from "../../consensus/runActions";
 import * as IDFS from "../../idfs/IDFS";
@@ -37,6 +38,10 @@ const getAction = () => ({
   ttr: 50000,
   data: {},
 });
+
+// distance scores + bonus for every action + scores of a wallet without ttd
+const getExpectedScores = (block: BlockData) =>
+  getHexPosition(getHashFromData(block)) / 10e6 + block.actions.length * actionBonus + 1;
 
 const runActionsSpy = jest.fn();
 
@@ -97,7 +102,7 @@ describe("Consensus utils", () => {
       const block = getBlockData();
       const blockScores = await measureBlock(block, true);
       expect(runActionsSpy).not.toBeCalled();
-      expect(blockScores).toBe(4246563);
+      expect(blockScores).toBe(getExpectedScores(block));
     });
 
     test("should return -1 if initialRouterHexID is not equal", async () => {
@@ -135,7 +140,8 @@ describe("Consensus utils", () => {
 
       const block = getBlockData();
       const blockScores = await measureBlock(block);
-      expect(blockScores).toBe(4246563);
+      expect(runActionsSpy).toBeCalledTimes(1);
+      expect(blockScores).toBe(getExpectedScores(block));
     });
   });
 });
