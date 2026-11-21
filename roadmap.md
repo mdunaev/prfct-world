@@ -13,48 +13,9 @@ Priority:
 Tickets that change the wire format or the consensus rules are marked **breaking**: all nodes
 must update together. The last section gives the order to release them in.
 
-## P0 - ledger
-
-These three were reproduced with tests during the audit. They lose tokens in normal use, without
-any attacker.
-
-### R-23. Deleting a wallet can detach other wallets (breaking)
-
-`deleteInIDFSRecursion` unlinks a child router as soon as its own `stateElements` list is empty.
-It does not look at the child's `routers`. If that router still has routers below it, every wallet
-under them disappears from the new root. Reproduced: in a tree of 60 wallets, deleting the elements
-of one inner router made 17 other live wallets unreachable. Every split and merge deletes wallets.
-
-- Where: `frontend/src/network/idfs/IDFS.tsx` (`deleteInIDFSRecursion`).
-- Done: a router is unlinked only when it has no elements and no routers. Test: delete the last
-  element of an inner router that has children, then verify every other wallet against the new
-  root.
-
-### R-24. Two equal payments to one receiver become one wallet (breaking)
-
-The receiver wallet of a split gets `lookupKey = hash(action.data.hexid + ttr + data)`, but a
-split has no `hexid` field, and the source wallet and the `nonce` are not used. Two senders who
-pay the same amount with the same data to one receiver in one block create identical wallets. The
-tree treats the second insert as a success and keeps one. Reproduced: both senders are debited,
-the receiver gets one wallet.
-
-- Where: `consensus/runActions.tsx` (split, also mint), `idfs/IDFS.tsx` (`pushToRouter`, the
-  "already exists" branch).
-- Done: the id of an output wallet includes the action author and the source wallet (or the
-  signed action digest from R-02). Inserting an element that already exists is an error for
-  `runActions`, not a success. Test: two equal payments give the receiver two spendable wallets.
-
-### R-25. Wallets with data lose balance on every split and merge (breaking)
-
-`ttdToTimePoints` divides by the size factor `ceil(size / 64)`, and `timePointsToTDD` divides by it
-again. For a wallet with 65-128 symbols of data, 100 steps become 50 time points and then 25 steps.
-Split applies this to the sender's change, merge to the combined balance. Wallets with empty data
-(factor 1) are not affected, which is why the dashboard looks correct.
-
-- Where: `consensus/utils.tsx` (`ttdToTimePoints`, `timePointsToTDD`), `consensus/runActions.tsx`.
-- Done: the storage-cost rule is written down; converting steps to time points and back returns
-  the same value up to the stated rounding. Test: split and merge conserve the total, minus the
-  explicit 1% fee, for data sizes 0, 64, 65 and 1200.
+Ticket numbers are not reused. R-23, R-24 and R-25 (lost wallets on delete, merged equal payments,
+balance loss for wallets with data) are fixed; see
+`frontend/src/network/tests/consensus/ledger.test.tsx`.
 
 ## P0 - consensus
 
@@ -356,8 +317,7 @@ describe an older tree (4 elements per router, now 3), an implemented `lostInIDF
 `runActions` and old score values.
 
 - Done: every test is either updated to the current behaviour after checking that the behaviour is
-  intended, or deleted with a reason; the skipped test runs; `npm test` is green. The tests named
-  in R-23, R-24, R-25 and R-01 are part of those tickets, not of this one.
+  intended, or deleted with a reason; the skipped test runs; `npm test` is green.
 
 ### R-18. Docker build
 
@@ -418,7 +378,6 @@ commented code reads `action.ttr` before `action` exists.
 2. **Fixes that do not change the protocol:** R-29, R-28, R-12, R-14, R-30, R-06, R-08, R-10.
 3. **Version boundary:** R-04 together with R-05. Everything below ships behind a new protocol
    version, so old tabs are cut off instead of splitting the network.
-4. **One breaking release:** the ledger fixes R-23, R-24, R-25; the hash and genesis R-03; then
-   R-02, R-26, R-27, R-07; the vote rules and catch-up R-01 with R-13; the wire changes of R-09 and
-   R-11.
+4. **One breaking release:** the hash and genesis R-03; then R-02, R-26, R-27, R-07; the vote
+   rules and catch-up R-01 with R-13; the wire changes of R-09 and R-11.
 5. **Operations:** R-16 and R-18 before a public launch; R-15 once more than a few nodes run.

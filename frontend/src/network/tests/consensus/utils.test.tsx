@@ -68,7 +68,8 @@ describe("Consensus utils", () => {
       expect(ttdToTimePoints(100000, stepSize, 50000)).toBe(50000);
     });
     test("should return time point for 5 step size", () => {
-      expect(ttdToTimePoints(100000, 5 * stepSize, 50000)).toBe(10000);
+      // 5 time points for every step: the inverse of timePointsToTDD below
+      expect(ttdToTimePoints(100000, 5 * stepSize, 50000)).toBe(250000);
     });
     test("should return time point for zero size the same as for one step size", () => {
       expect(ttdToTimePoints(100000, 0, 50000)).toBe(50000);

@@ -69,11 +69,20 @@ export const measureBlock = (block: BlockData, skipCheck = false): number => {
   return countBlockScores(block, completedActions.length);
 };
 
+//_ Storage cost rule.
+//_ A wallet pays for the data it stores: every step of life costs one time point
+//_ for each started `stepSize` symbols of data (a wallet without data pays for one).
+//_   time points = steps left * size factor
+//_   steps left  = time points / size factor, rounded down
+//_ The two functions are inverse, so a balance survives a split or a merge unchanged
+//_ except for that rounding.
+const getSizeFactor = (size: number | undefined) => Math.ceil((size || stepSize) / stepSize);
+
 export const ttdToTimePoints = (ttd: number, size: number | undefined, blockNumber: number) =>
-  Math.floor((ttd - blockNumber) / Math.ceil((size || stepSize) / stepSize));
+  Math.floor((ttd - blockNumber) * getSizeFactor(size));
 
 export const timePointsToTDD = (tpoints: number, size: number | undefined, blockNumber: number) =>
-  Math.floor(blockNumber + tpoints / Math.ceil((size || stepSize) / stepSize));
+  Math.floor(blockNumber + tpoints / getSizeFactor(size));
 
 export const saveWalletFromBlock = (wallet?: StateElementWithPath) => {
   if (!wallet || !wallet.element) {

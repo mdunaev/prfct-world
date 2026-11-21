@@ -246,7 +246,13 @@ const deleteInIDFSRecursion = (
 
     const nextInternalRouter = getRouterFromDB(nextInternalRouterInfo.hexid);
 
-    if (nextInternalRouter && nextInternalRouter.stateElements.length === 0) {
+    // an empty router is unlinked only if nothing hangs below it:
+    // its own elements can be gone while its child routers still hold live elements
+    if (
+      nextInternalRouter &&
+      nextInternalRouter.stateElements.length === 0 &&
+      Object.keys(nextInternalRouter.routers).length === 0
+    ) {
       delete router.routers[internalRouterPath];
       router.size = router.size - removedSize;
     } else {

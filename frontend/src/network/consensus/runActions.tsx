@@ -29,6 +29,13 @@ const filterRouterList = (routerList: Router[]) => {
   return uniqRoutes.filter((router) => router.layer !== 0);
 };
 
+//_ Push an element that must be new. The tree reports an element that is already there as a
+//_ successful push, so two actions with the same output would silently become one element.
+const pushNewElement = (element: StateElement) => {
+  if (findPathToElementInIDFS(getHashFromData(element)).length > 0) return undefined;
+  return pushToIdfsTree(element);
+};
+
 export interface RunActionsProps {
   actions: { [authorHexid: string]: Action };
   initialRouterHexID: string;
@@ -110,15 +117,16 @@ export const runActions = (props: RunActionsProps) => {
           }
 
           const element: StateElement = {
-            lookupKey: getHashFromData(action.data.hexid + action.ttr + action.data.data),
+            // an author has one action per block, so the key is unique for every mint
+            lookupKey: getHashFromData([actionAuthorHexid, action.data.hexid, action.ttr]),
             owner: action.data.hexid,
-            ttd: action.ttr + mintValue,
+            ttd: timePointsToTDD(mintValue, action.data.data?.length, action.ttr),
             type: StateElementTypes.WALLET,
             data: action.data.data,
             createdAt: action.ttr,
           };
 
-          const result = pushToIdfsTree(element);
+          const result = pushNewElement(element);
 
           if (result) {
             completedActions.push(actionAuthorHexid);
@@ -207,7 +215,7 @@ export const runActions = (props: RunActionsProps) => {
             data: source.data,
             createdAt: action.ttr,
           };
-          const nextSourceWallet = pushToIdfsTree(nextSourceWalletElement);
+          const nextSourceWallet = pushNewElement(nextSourceWalletElement);
           const nextSourceWalletHexId = getHashFromData(nextSourceWalletElement);
 
           if (!nextSourceWallet) {
@@ -221,14 +229,16 @@ export const runActions = (props: RunActionsProps) => {
           }
 
           const nextReceiverWalletElement = {
-            lookupKey: getHashFromData(action.data.hexid + action.ttr + action.data.data),
+            // the source wallet is spent only once, so the key is unique for every payment:
+            // two equal payments to one receiver must stay two wallets
+            lookupKey: getHashFromData([actionAuthorHexid, wallet, action.ttr]),
             owner: receiver,
             ttd: nextRecieverTdd,
             type: StateElementTypes.WALLET,
             data: data.slice(0, maxDataSize),
             createdAt: action.ttr,
           };
-          const nextRecieverWallet = pushToIdfsTree(nextReceiverWalletElement);
+          const nextRecieverWallet = pushNewElement(nextReceiverWalletElement);
           const nextRecieverWalletHexId = getHashFromData(nextReceiverWalletElement);
 
           if (!nextRecieverWallet) {
@@ -329,7 +339,7 @@ export const runActions = (props: RunActionsProps) => {
             data: mainWallet.data,
             createdAt: action.ttr,
           };
-          const resultWallet = pushToIdfsTree(resultWalletElement);
+          const resultWallet = pushNewElement(resultWalletElement);
 
           if (!resultWallet) {
             console.log("ATTENTION: run actions error: ");
